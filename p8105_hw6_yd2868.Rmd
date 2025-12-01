@@ -1,0 +1,136 @@
+---
+title: "p8105_hw6_yd2868"
+output: html_document
+date: "2025-11-30"
+---
+
+```{r}
+library(tidyverse)
+library(broom)
+library(p8105.datasets)
+library(modelr)
+```
+
+# Problem1
+import and clean the data
+```{r}
+homicides = read.csv("data-homicides-master/homicide-data.csv")|>
+  mutate(
+    city_state = str_c(city, ", ", state),
+    victim_age = as.numeric(victim_age),
+    solved = if_else(disposition == "Closed by arrest", 1, 0)
+  ) |>
+  filter(
+    !city_state %in% c("Dallas, TX",
+                       "Phoenix, AZ",
+                       "Kansas City, MO",
+                       "Tulsa, AL"),
+    victim_race %in% c("White", "Black"),
+    !is.na(victim_age)
+  )
+```
+glm for Baltimore,MD
+```{r}
+baltimore = 
+  homicides |>
+  filter(city_state == "Baltimore, MD")
+
+glm_Baltimore = glm(
+  solved ~ victim_age + victim_race + victim_sex,
+  data   = baltimore,
+  family = binomial()
+)
+
+baltimore_OR = tidy(glm_Baltimore, conf.int = TRUE, exponentiate = TRUE)
+```
+The estimate of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed is `r round(baltimore_OR[4,6],2)`, confidence interval is `r round(baltimore_OR[4,6],3)` - `r round(baltimore_OR[4,7],3)`
+
+glm for all cities
+```{r}
+city_nest = homicides |>
+  nest(data = -city_state)
+
+city_OR_results =
+  city_nest|>
+  mutate(
+    fit = map(data, \(x) glm(
+      solved ~ victim_age + victim_race + victim_sex,
+      data = x,
+      family = binomial()
+    )),
+    tidied = map(fit, \(x) tidy(x, exponentiate = TRUE, conf.int = TRUE))
+  ) |>
+  unnest(tidied)
+```
+
+create the plot
+```{r}
+city_sex_OR =
+  city_OR_results |>
+  filter(term == "victim_sexMale") |>
+  mutate(
+    city_state = reorder(city_state, estimate)
+  )
+
+ggplot(city_sex_OR, aes(x = estimate, y = city_state)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0) +
+  labs(
+    x = "Adjusted OR (male vs female)",
+    y = "City",
+    title = "Adjusted odds ratios for solving homicides,\ncomparing male to female victims"
+  ) +
+  theme_minimal()
+```
+The plot shows that in most cities, the adjusted odds ratio is below 1, indicating that homicides involving male victims generally have lower odds of being solved compared with those involving female victims, after controlling for age and race.
+
+There is also substantial heterogeneity across cities. In several cities, the confidence interval lies well below 1, suggesting a clear disadvantage for male victims. In contrast, some cities have ORs near 1 with confidence intervals that cross 1, indicating little or no evidence of a sex difference. Overall, the association between victim sex and case resolution varies meaningfully across cities.
+
+# Problem2
+import data and finish SLR
+```{r}
+data("weather_df")
+weather_bootstrap = weather_df|>
+  modelr::bootstrap(5000)|>
+  mutate(
+    fit = map(strap, \(x) lm(tmax ~ tmin + prcp, data = x)),
+    tidied = map(fit, tidy),
+    r2 = map_dbl(fit, \(x) glance(x)$r.squared),
+    beta_ratio = map_dbl(
+      fit,
+      \(x) {
+        coefs = tidy(x)
+        b1 = coefs$estimate[coefs$term == "tmin"]
+        b2 = coefs$estimate[coefs$term == "prcp"]
+        b1 / b2
+      }
+    )
+  ) 
+```
+
+calculate CI and distribution
+```{r}
+weather_bootstrap |>
+  ggplot(aes(x = r2)) +
+  geom_histogram(bins = 30) +
+  labs(x = expression(hat(r)^2), y = "Count")
+
+
+weather_bootstrap |>
+  ggplot(aes(x = beta_ratio)) +
+  geom_histogram(bins = 30) +
+  labs(x = expression(hat(beta)[1] / hat(beta)[2]), y = "Count")
+
+
+weather_CI = 
+weather_bootstrap |>
+  summarise(
+    r2_low   = quantile(r2, 0.025),
+    r2_high  = quantile(r2, 0.975),
+    ratio_low  = quantile(beta_ratio, 0.025),
+    ratio_high = quantile(beta_ratio, 0.975)
+  )
+```
+The distribution of $\hat{r}^2$ and $\hat\beta_1 / \hat\beta_2$ hat is above. Distribution of $\hat{r}^2$ is approximately symmetric and bell-shaped, indicates that the model’s explanatory power is relatively stable across bootstrap resamples. The distribution of $\hat\beta_1 / \hat\beta_2$ has a heavier tail, ikely because the precipitation coefficient is small and highly variable in this dataset.
+
+The CI for $\hat{r}^2$ is from `r round(weather_CI[1,1] , 3)` to `r round(weather_CI[1,2] , 3)`. CI for $\hat\beta_1 / \hat\beta_2$ is from `r round(weather_CI[1,3] , 3)` to `r round(weather_CI[1,4] , 3)`.
