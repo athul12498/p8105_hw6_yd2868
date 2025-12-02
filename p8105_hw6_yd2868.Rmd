@@ -9,6 +9,7 @@ library(tidyverse)
 library(broom)
 library(p8105.datasets)
 library(modelr)
+library(glmnet)
 ```
 
 # Problem1
@@ -134,3 +135,70 @@ weather_bootstrap |>
 The distribution of $\hat{r}^2$ and $\hat\beta_1 / \hat\beta_2$ hat is above. Distribution of $\hat{r}^2$ is approximately symmetric and bell-shaped, indicates that the model’s explanatory power is relatively stable across bootstrap resamples. The distribution of $\hat\beta_1 / \hat\beta_2$ has a heavier tail, ikely because the precipitation coefficient is small and highly variable in this dataset.
 
 The CI for $\hat{r}^2$ is from `r round(weather_CI[1,1] , 3)` to `r round(weather_CI[1,2] , 3)`. CI for $\hat\beta_1 / \hat\beta_2$ is from `r round(weather_CI[1,3] , 3)` to `r round(weather_CI[1,4] , 3)`.
+
+# Problem3
+import and clean data
+```{r}
+bw_df = read.csv("birthweight.csv")|>
+  mutate(
+    babysex = recode(babysex, `1` = "male", `2` = "female"),
+    frace = recode(frace,
+                   `1` = "white", `2` = "black", `3` = "asian",
+                   `4` = "puerto", `8` = "other", `9` = "unknown"),
+    mrace = recode(mrace,
+                   `1` = "white", `2` = "black", `3` = "asian",
+                   `4` = "puerto", `8` = "other"),
+    malform = recode(malform, `0` = "absent", `1` = "present"),
+    
+    babysex = factor(babysex),
+    frace = factor(frace),
+    mrace = factor(mrace),
+    malform = factor(malform)
+  )
+```
+use LASSO to build the model
+```{r}
+matrix_bw = model.matrix(bwt ~ . , data = bw_df)[ , -1]
+
+set.seed(1)
+
+cv_lasso = cv.glmnet(
+  matrix_bw, bw_df$bwt,
+  alpha = 1,        
+  nfolds = 10
+)
+
+lasso_coef = coef(cv_lasso, s = "lambda.1se")
+
+active_vars = rownames(lasso_coef)[lasso_coef[,1] != 0]
+active_vars = active_vars[active_vars != "(Intercept)"]
+
+df_lasso_lm =
+  cbind(
+    bwt = bw_df$bwt,
+    as.data.frame(matrix_bw[, active_vars, drop = FALSE])
+  )
+
+bw_lasso_model = lm(bwt ~ ., data = df_lasso_lm)
+summary(bw_lasso_model)
+
+plot = df_lasso_lm |>
+  add_predictions(bw_lasso_model) |>
+  add_residuals(bw_lasso_model) |>
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red") +
+  labs(
+    x = "Fitted birthweight (grams)",
+    y = "Residuals",
+    title = "Residuals vs fitted values for LASSO-selected model"
+  )
+```
+
+I used LASSO to choose which variables are going to be used in the regression, and the results are: `r active_vars`. 
+
+The plot of model residuals against fitted values is below
+```{r}
+plot
+```
+
