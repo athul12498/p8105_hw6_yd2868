@@ -10,6 +10,7 @@ library(broom)
 library(p8105.datasets)
 library(modelr)
 library(glmnet)
+library(purrr)
 ```
 
 # Problem1
@@ -194,11 +195,63 @@ plot = df_lasso_lm |>
     title = "Residuals vs fitted values for LASSO-selected model"
   )
 ```
+I first applied LASSO regression with 10-fold cross-validation to identify a parsimonious set of predictors with meaningful contributions to birthweight. The variables retained in the final model (using the 1-SE penalty) were: `r paste(active_vars, collapse = ", ")`.
 
-I used LASSO to choose which variables are going to be used in the regression, and the results are: `r active_vars`. 
-
-The plot of model residuals against fitted values is below
-```{r}
+Using these selected predictors, I fit an ordinary least squares regression model. The residuals-versus-fitted plot is shown below. The residuals are approximately centered around zero with no strong patterns or systematic deviations, suggesting that the linearity assumption is reasonably satisfied for this model. There is some mild heteroskedasticity, but no major structure remains in the residuals. Overall, the LASSO-selected linear model appears to give an adequate fit to the birthweight data.
+```{r echo=FALSE}
 plot
 ```
 
+compare model to two others
+```{r}
+bw_cv =
+crossv_mc(bw_df, n = 100) |>
+mutate(
+mod_mine = map(train, ~ lm(
+bwt ~ gaweeks + blength + bhead + babysex +
+mrace + smoken + ppbmi + delwt + wtgain,
+data = .x
+)),
+
+mod_len_age   = map(train, ~ lm(
+  bwt ~ blength + gaweeks,
+  data = .x
+)),
+
+mod_head_int  = map(train, ~ lm(
+  bwt ~ bhead * blength * babysex,
+  data = .x
+)),
+
+rmse_mine     = map2_dbl(mod_mine,    test, rmse),
+rmse_len_age  = map2_dbl(mod_len_age, test, rmse),
+rmse_head_int = map2_dbl(mod_head_int,test, rmse)
+)
+
+bw_cv_results =
+bw_cv |>
+summarise(
+rmse_mine = mean(rmse_mine),
+rmse_len_age = mean(rmse_len_age),
+rmse_head_int = mean(rmse_head_int)
+) |>
+pivot_longer(
+everything(),
+names_to = "model",
+values_to = "rmse"
+) |>
+mutate(
+model = recode(
+model,
+rmse_mine = "My model",
+rmse_len_age = "Length + gestational age",
+rmse_head_int = "Head × length × sex (all interactions)"
+)
+)
+
+bw_cv_results
+```
+
+Based on 100 Monte-Carlo cross-validation splits, the LASSO-selected model achieves the lowest prediction error, indicating the best out-of-sample performance.
+The simple model using only length and gestational age performs slightly worse, while the fully interacted model has the highest RMSE, suggesting overfitting.
+Overall, the LASSO-based model provides the most reliable predictive accuracy among the three.
