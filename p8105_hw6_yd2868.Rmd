@@ -252,6 +252,6 @@ rmse_head_int = "Head × length × sex (all interactions)"
 bw_cv_results
 ```
 
-Based on 100 Monte-Carlo cross-validation splits, the LASSO-selected model achieves the lowest prediction error, indicating the best out-of-sample performance.
+Based on 100 Monte-Carlo cross-validation splits, my LASSO-selected model achieves the lowest prediction error, indicating the best out-of-sample performance.
 The simple model using only length and gestational age performs slightly worse, while the fully interacted model has the highest RMSE, suggesting overfitting.
 Overall, the LASSO-based model provides the most reliable predictive accuracy among the three.
